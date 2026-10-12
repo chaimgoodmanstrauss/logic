@@ -49,15 +49,16 @@ STRUCTURE (single file, no libraries)
   --t:#55d3a8; --t-soft:#163a30; --f:#ff8098; --f-soft:#3d1c25;
   --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25); color-scheme:dark}
 *{box-sizing:border-box}
-body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.5;padding-inline:16px;padding-block:20px 48px}
-.app{max-width:960px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
-header{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.5;padding-inline:16px;padding-block:20px 48px;min-height:100vh;min-height:100dvh;display:flex;flex-direction:column}
+.app{max-width:640px;width:100%;margin:auto;display:flex;flex-direction:column;gap:18px}
+header{display:flex;align-items:center;justify-content:flex-start;gap:16px;flex-wrap:wrap;text-align:left}
+.statrow{flex-basis:100%;display:flex;align-items:center;justify-content:flex-start;gap:16px}
 .brand{font-family:var(--display);font-weight:800;font-size:1.9rem;letter-spacing:-.02em;margin:0;line-height:1}
 .brand span{color:var(--accent)}
 .tabs{display:flex;gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:4px}
 .tabs button{font:600 .9rem var(--body);border:0;background:none;color:var(--muted);padding:6px 14px;border-radius:999px;cursor:pointer}
 .tabs button[aria-selected="true"]{background:var(--accent);color:var(--accent-ink)}
-.score{margin-left:auto;position:relative;font-family:var(--display);font-weight:700;font-size:1.05rem;display:flex;align-items:baseline;gap:8px}
+.score{position:relative;font-family:var(--display);font-weight:700;font-size:1.05rem;display:flex;align-items:baseline;gap:8px}
 .score small{font:600 .7rem var(--body);text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
 .score b{font-size:1.6rem;font-variant-numeric:tabular-nums;min-width:2ch;text-align:right}
 .pop{position:absolute;right:0;top:-6px;font:700 1rem var(--mono);pointer-events:none;animation:pop 1.1s ease-out forwards}
@@ -65,8 +66,8 @@ header{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 @keyframes pop{0%{opacity:0;transform:translateY(6px)}15%{opacity:1}100%{opacity:0;transform:translateY(-26px)}}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);padding:18px;display:flex;flex-direction:column;gap:14px;min-width:0}
 [hidden]{display:none!important}
-.panel{display:flex;flex-direction:column;gap:14px;min-width:0}
-.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.panel{display:flex;flex-direction:column;align-items:flex-start;text-align:left;gap:14px;min-width:0}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:flex-start}
 .bar input{flex:1 1 220px;min-width:0;font:500 1rem var(--mono);padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)}
 .btn{font:600 .9rem var(--body);border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:9px 14px;border-radius:10px;cursor:pointer}
 .btn:hover{border-color:var(--accent)}
@@ -76,13 +77,13 @@ header{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 @keyframes glow{50%{box-shadow:0 0 0 5px var(--accent-soft)}}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .err{color:var(--f);font-size:.9rem;min-height:0}
-.info{display:flex;gap:10px 18px;flex-wrap:wrap;align-items:baseline;min-height:1.6rem}
+.info{display:flex;gap:10px 18px;flex-wrap:wrap;align-items:baseline;justify-content:flex-start;min-height:1.6rem}
 .info .sub{font:700 1.05rem var(--mono)}
 .chip{font:600 .72rem var(--body);text-transform:uppercase;letter-spacing:.07em;padding:3px 9px;border-radius:999px;background:var(--accent-soft);color:var(--accent)}
 .chip.sun{background:var(--sel);color:var(--ink)}
 .muted{color:var(--muted)}
 .wrap{overflow-x:auto;padding:4px 2px 8px}
-.grid{display:grid;width:max-content;font-family:var(--mono);margin:0 auto}
+.grid{display:grid;width:max-content;font-family:var(--mono);margin:0}
 .h{height:3rem;display:flex;align-items:center;justify-content:center;font-size:1.4rem;font-weight:700;border-bottom:2px solid var(--ink);user-select:none}
 .h.vh{color:var(--muted);font-size:1.1rem}
 .h.tok{cursor:pointer;position:relative}
@@ -109,21 +110,21 @@ header{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 .c.chk{opacity:.42}
 .c.chk.bad{opacity:.85;background:var(--f-soft)}
 .c.flash-ok{background:var(--t-soft)} .c.flash-bad{background:var(--f-soft)}
-.controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:flex-start}
 .pad{display:flex;gap:6px}
 .pad button{font:700 1.1rem var(--mono);width:3rem;height:2.6rem;border-radius:10px;border:1px solid var(--line);background:var(--surface);cursor:pointer;color:var(--ink)}
 .pad .pt{color:var(--t);background:var(--t-soft);border-color:transparent}
 .pad .pf{color:var(--f);background:var(--f-soft);border-color:transparent}
 .msg{font-weight:600}
 .msg.good{color:var(--t)} .msg.bad{color:var(--f)}
-.verdict{border-radius:14px;padding:12px 14px;background:var(--sel);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.verdict{border-radius:14px;padding:12px 14px;background:var(--sel);display:flex;gap:12px;align-items:center;justify-content:flex-start;flex-wrap:wrap;text-align:left}
 .verdict strong{font-family:var(--display);font-size:1.2rem}
-.help{font-size:.88rem;color:var(--muted);margin:0;max-width:70ch}
+.help{font-size:.88rem;color:var(--muted);margin:0;max-width:60ch}
 kbd{font:600 .78rem var(--mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:0 5px;background:var(--surface)}
 .nsel{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .nsel button{font:700 .95rem var(--mono);width:2.4rem;height:2.4rem;border-radius:50%;border:1px solid var(--line);background:var(--surface);cursor:pointer;color:var(--ink)}
 .nsel button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
-.timer{font:700 1rem var(--mono);font-variant-numeric:tabular-nums;margin-left:auto}
+.timer{font:700 1rem var(--mono);font-variant-numeric:tabular-nums}
 @media (prefers-reduced-motion: reduce){*{animation:none!important}}
 </style>
 
@@ -134,17 +135,18 @@ kbd{font:600 .78rem var(--mono);border:1px solid var(--line);border-bottom-width
       <button id="tabBlast" role="tab" aria-selected="true">Make</button>
       <button id="tabWarm" role="tab" aria-selected="false">Warm-up</button>
     </div>
-    <div class="score"><small>Level</small><b id="lvl">1</b></div>
-    <div class="score"><small>Score</small><b id="score">0</b></div>
+    <div class="statrow">
+      <div class="score"><small>Level</small><b id="lvl">1</b></div>
+      <div class="score"><small>Score</small><b id="score">0</b></div>
+      <button class="btn" id="resetGameBtn">Reset game</button>
+    </div>
   </header>
 
   <div class="card pane">
   <section id="blast" class="panel" role="tabpanel">
     <div class="bar">
-      <input id="exprIn" aria-label="Expression" spellcheck="false" autocomplete="off">
-      <button class="btn" id="loadBtn">Load</button>
       <button class="btn" id="nextBtn">Next expression</button>
-      <button class="btn" id="resetBtn">Restart</button>
+      <button class="btn" id="clearBtn">Clear</button>
     </div>
     <div class="err" id="err"></div>
     <div class="info" id="info"></div>
@@ -155,7 +157,6 @@ kbd{font:600 .78rem var(--mono);border:1px solid var(--line);border-bottom-width
       <button class="btn primary" id="checkBtn" disabled>Check column</button>
       <span class="msg" id="msg"></span>
     </div>
-    <p class="help">Click a variable in the expression. Click again inside the highlight to grow it outward one level, until the whole formula is selected. Type <kbd>T</kbd>/<kbd>F</kbd> (or <kbd>1</kbd>/<kbd>0</kbd>) down the column under its main connective, then <kbd>Enter</kbd> to check. Each row scores ±(2<sup>jump</sup> − 1), where the jump is how many levels you climbed above the lowest non-variable part beneath it (a checked part counts at its level; variables don't count). Skip ahead for big points; parts inside a checked column score 0. Write with ~ &amp; V -&gt; &lt;-&gt;.</p>
   </section>
 
   <section id="warm" class="panel" role="tabpanel" hidden>
@@ -254,7 +255,7 @@ const LEVELS=parseSpec(LEVEL_SPEC), LAST_N=LEVELS.length;
 const levelFor=L=>LEVELS[Math.min(L,LAST_N)-1];
 const quota=L=>3+Math.floor(L/2); // completed expressions needed to clear level L
 const LV={level:1,done:0,idx:-1};  // in-memory only: resets on reload
-let B=null;
+let B=null, CUR='';                 // CUR: the expression currently on the board
 function updateLevel(){
   $('lvl').textContent=LV.level;
 }
@@ -270,7 +271,7 @@ function loadExpr(str){
     P.nodes.forEach(n=>n.vals=envs.map(e=>ev(n,e)));
     B={...P,R,sel:null,cols:{},cur:0,byAnchor:{},burst:false};
     P.nodes.forEach(n=>B.byAnchor[n.anchor]=n);
-    $('exprIn').value=txt(P.toks,0,P.toks.length-1);
+    CUR=str;
     $('msg').textContent='';
     renderBlast();
   }catch(e){$('err').textContent=e.message}
@@ -384,10 +385,11 @@ grid.addEventListener('click',e=>{
   const t=e.target.closest('[data-i]');if(t)return clickToken(+t.dataset.i);
   const c=e.target.closest('[data-a]');if(c)clickCell(+c.dataset.a,+c.dataset.r);
 });
-$('loadBtn').onclick=()=>loadExpr($('exprIn').value);
-$('exprIn').addEventListener('keydown',e=>{if(e.key==='Enter')loadExpr(e.target.value)});
 $('nextBtn').onclick=nextExpr;
-$('resetBtn').onclick=()=>loadExpr($('exprIn').value);
+$('clearBtn').onclick=()=>loadExpr(CUR);
+$('resetGameBtn').onclick=()=>{ // back to the start of level 1, score included
+  Object.assign(LV,{level:1,done:0,idx:-1});S=0;scoreEl.textContent=S;updateLevel();nextExpr();
+};
 $('checkBtn').onclick=checkBlast;
 
 /* ===== 4. Warm-up ===== */
