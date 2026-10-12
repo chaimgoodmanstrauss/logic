@@ -97,11 +97,11 @@ header{display:flex;align-items:center;justify-content:flex-start;gap:16px;flex-
 .h.tok.done::after{content:"";position:absolute;bottom:4px;width:5px;height:5px;border-radius:50%;background:var(--accent);opacity:.55}
 .h.tok.burst{animation:burst .45s cubic-bezier(.2,1.6,.4,1)}
 @keyframes burst{0%{transform:scale(.7);background:var(--sel-edge)}100%{transform:scale(1)}}
-.c{height:2rem;display:flex;align-items:center;justify-content:center;font-size:1rem;font-weight:700}
+.c{height:2.4rem;display:flex;align-items:center;justify-content:center;font-size:1rem;font-weight:700}
 .c.odd{background:color-mix(in srgb,var(--line) 28%,transparent)}
 .c.sep,.h.sep{border-right:1.5px solid var(--line)}
 .c.v.T{color:var(--t)} .c.v.F{color:var(--f)}
-.c.cell{cursor:pointer;border-radius:6px}
+.c.cell{cursor:pointer;border-radius:6px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;user-select:none}
 .c.cell.T{color:var(--t)} .c.cell.F{color:var(--f)}
 .c.act{background:var(--accent-soft)}
 .c.cur{box-shadow:inset 0 0 0 2px var(--accent)}
@@ -295,11 +295,13 @@ function clickToken(i){
   if(s&&s.start<=i&&i<=s.end) select(s.parent||smallest()); else select(smallest());
   renderBlast();
 }
+// tap cycle: blank -> T -> F -> blank
+const cycle=v=>v===''?'T':v==='T'?'F':'';
 function clickCell(a,r){
   const n=B.byAnchor[a],c=col(a);
   if(B.sel!==n){select(n,r)}
   else if(!c.checked){
-    if(B.cur===r) c.vals[r]=c.vals[r]===''?'T':c.vals[r]==='T'?'F':'';
+    c.vals[r]=cycle(c.vals[r]);
     B.cur=r;
   }
   renderBlast();
@@ -366,13 +368,12 @@ function renderBlast(){
   const rc=B.cols[B.root.anchor];
   if(rc&&rc.checked){
     const t=B.root.vals.filter(Boolean).length;
-    const kind=t===R?'Tautology':t===0?'Contradiction':'Contingent';
-    const why=t===R?'True on every row.':t===0?'False on every row.':`True on ${t} of ${R} rows.`;
+    const kind=t===R?"Tautology":t===0?"Contradiction":"";
     if(!B.counted){B.counted=true;LV.done++}
     const q=quota(LV.level), last=LV.level>=LAST_N;
     const lvl=LV.done>=q?(last?'All levels cleared — keep practicing.':`Level ${LV.level} cleared.`):`Level ${LV.level}: ${LV.done}/${q} done.`;
     const btn=LV.done>=q&&!last?'Next level':'Next expression';
-    $('verdict').innerHTML=`<div class="verdict"><strong>${kind}</strong><span>${why} <span class="muted">${lvl}</span></span><button class="btn primary" onclick="nextExpr()">${btn}</button></div>`;
+    $('verdict').innerHTML=`<div class="verdict">${kind?`<strong>${kind}</strong>`:""}<span class="muted">${lvl}</span><button class="btn primary" onclick="nextExpr()">${btn}</button></div>`;
   }else $('verdict').innerHTML='';
 }
 function nextExpr(){
@@ -442,7 +443,7 @@ for(let i=1;i<=5;i++){const b=document.createElement('button');b.textContent=i;b
 wgrid.addEventListener('click',e=>{
   const t=e.target.closest('[data-c]');if(!t||W.checked)return;
   const c=+t.dataset.c,r=+t.dataset.r;
-  if(W.cur.c===c&&W.cur.r===r){const v=W.vals[c][r];W.vals[c][r]=v===''?'T':v==='T'?'F':''}
+  W.vals[c][r]=cycle(W.vals[c][r]);
   W.cur={c,r};renderWarm();
 });
 $('wcheck').onclick=wCheck;$('wreset').onclick=()=>newWarm(W.n);$('wnext').onclick=()=>newWarm(W.n+1);
