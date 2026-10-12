@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Truth Maker</title>
+<!--
+STRUCTURE (single file, no libraries)
+- CSS: tokens on :root (light) + dark overrides; .grid = one CSS grid per table (var cols | sep | one col per token).
+- JS sections:
+  1. Parser: tokenize(str) -> tokens; parse(str) -> {toks, root, nodes, vars}. Node = {type:'var'|'not'|'bin', op, a, b,
+     start,end (token span incl. parens), anchor (token index where its column sits), h (height; leaf=0), parent}.
+     Precedence ¬ > ∧ > ∨ > → (right-assoc) > ↔. Accepts ~ ! - not, & ^ and, V v | or, -> =>, <-> iff.
+  2. Score: S (localStorage 'tb-score'), addScore(d) with pop animation.
+     Levels: LEVEL_SPEC (one line per level, parsed by parseSpec) lists each level's expressions; LV {level,done,idx}.
+     A level clears after quota(L) completed expressions; nextExpr() advances to the next level, and the last level repeats.
+  3. Blast game: state B {toks,vars,R,sel,cols{anchor:{vals[],checked,ok[]}},cur,byAnchor}.
+     clickToken(i): select smallest node containing i, or if inside current selection, grow to parent.
+     typeVal('T'|'F'), back(), checkBlast(): ±worth(n) per row.
+     worth(n) = 2^(h(n) − base(n)) − 1, base = min over non-variable child branches of the checked column's h (recursing below unchecked ones; no such branch → 0);
+     0 if an ancestor is already checked. Rewards jumping levels; variables score 0. renderBlast() rebuilds grid HTML.
+  4. Warm-up: state W {n, vals[c][r], checked, ok[c][r], cur{c,r}, t0, t1}. Rows in decreasing binary (all-T first).
+  5. Input: global keydown routed by mode; on-screen pads; grid click delegation.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+/* Layout: one centered column; header bar, mode tabs, a big tabular "board" in mono, controls below. */
+:root{
+  --bg:#f3faf7; --surface:#ffffff; --ink:#16323a; --muted:#69878c; --line:#d6e8e3;
+  --accent:#0e9a87; --accent-ink:#ffffff; --accent-soft:#d2f1e9;
+  --sel:#fff0b3; --sel-edge:#efc548;
+  --t:#0d8768; --t-soft:#e3f6ef; --f:#d24c6c; --f-soft:#fde8ee;
+  --shadow:0 1px 2px rgba(22,50,58,.06),0 8px 24px rgba(22,50,58,.06);
+  --display:"Bricolage Grotesque",ui-sans-serif,system-ui,sans-serif;
+  --body:"Figtree",ui-sans-serif,system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0e1c1f; --surface:#14282c; --ink:#e2f3ef; --muted:#88a8a9; --line:#22403f;
+  --accent:#38c7b0; --accent-ink:#06211d; --accent-soft:#183c37;
+  --sel:#3a3212; --sel-edge:#c9a332;
+  --t:#55d3a8; --t-soft:#163a30; --f:#ff8098; --f-soft:#3d1c25;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0e1c1f; --surface:#14282c; --ink:#e2f3ef; --muted:#88a8a9; --line:#22403f;
+  --accent:#38c7b0; --accent-ink:#06211d; --accent-soft:#183c37;
+  --sel:#3a3212; --sel-edge:#c9a332;
+  --t:#55d3a8; --t-soft:#163a30; --f:#ff8098; --f-soft:#3d1c25;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25); color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.5;padding-inline:16px;padding-block:20px 48px}
+.app{max-width:960px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+header{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.brand{font-family:var(--display);font-weight:800;font-size:1.9rem;letter-spacing:-.02em;margin:0;line-height:1}
+.brand span{color:var(--accent)}
+.tabs{display:flex;gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:4px}
+.tabs button{font:600 .9rem var(--body);border:0;background:none;color:var(--muted);padding:6px 14px;border-radius:999px;cursor:pointer}
+.tabs button[aria-selected="true"]{background:var(--accent);color:var(--accent-ink)}
+.score{margin-left:auto;position:relative;font-family:var(--display);font-weight:700;font-size:1.05rem;display:flex;align-items:baseline;gap:8px}
+.score small{font:600 .7rem var(--body);text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.score b{font-size:1.6rem;font-variant-numeric:tabular-nums;min-width:2ch;text-align:right}
+.pop{position:absolute;right:0;top:-6px;font:700 1rem var(--mono);pointer-events:none;animation:pop 1.1s ease-out forwards}
+.pop.up{color:var(--t)} .pop.down{color:var(--f)}
+@keyframes pop{0%{opacity:0;transform:translateY(6px)}15%{opacity:1}100%{opacity:0;transform:translateY(-26px)}}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);padding:18px;display:flex;flex-direction:column;gap:14px;min-width:0}
+[hidden]{display:none!important}
+.panel{display:flex;flex-direction:column;gap:14px;min-width:0}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.bar input{flex:1 1 220px;min-width:0;font:500 1rem var(--mono);padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)}
+.btn{font:600 .9rem var(--body);border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:9px 14px;border-radius:10px;cursor:pointer}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn:disabled{opacity:.4;cursor:default}
+.btn.ready{animation:glow 1.4s ease-in-out infinite}
+@keyframes glow{50%{box-shadow:0 0 0 5px var(--accent-soft)}}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.err{color:var(--f);font-size:.9rem;min-height:0}
+.info{display:flex;gap:10px 18px;flex-wrap:wrap;align-items:baseline;min-height:1.6rem}
+.info .sub{font:700 1.05rem var(--mono)}
+.chip{font:600 .72rem var(--body);text-transform:uppercase;letter-spacing:.07em;padding:3px 9px;border-radius:999px;background:var(--accent-soft);color:var(--accent)}
+.chip.sun{background:var(--sel);color:var(--ink)}
+.muted{color:var(--muted)}
+.wrap{overflow-x:auto;padding:4px 2px 8px}
+.grid{display:grid;width:max-content;font-family:var(--mono);margin:0 auto}
+.h{height:3rem;display:flex;align-items:center;justify-content:center;font-size:1.4rem;font-weight:700;border-bottom:2px solid var(--ink);user-select:none}
+.h.vh{color:var(--muted);font-size:1.1rem}
+.h.tok{cursor:pointer;position:relative}
+.h.tok:hover{color:var(--accent)}
+.h.tok.in{background:var(--sel)}
+.h.tok.s0{border-radius:12px 0 0 0;box-shadow:inset 2px 0 0 var(--sel-edge)}
+.h.tok.s1{border-radius:0 12px 0 0;box-shadow:inset -2px 0 0 var(--sel-edge)}
+.h.tok.s0.s1{border-radius:12px 12px 0 0;box-shadow:inset 2px 0 0 var(--sel-edge),inset -2px 0 0 var(--sel-edge)}
+.h.tok.an{color:var(--accent)}
+.c.root{outline:1px solid color-mix(in srgb,var(--muted) 50%,transparent);outline-offset:-1px}
+.h.tok.done::after{content:"";position:absolute;bottom:4px;width:5px;height:5px;border-radius:50%;background:var(--accent);opacity:.55}
+.h.tok.burst{animation:burst .45s cubic-bezier(.2,1.6,.4,1)}
+@keyframes burst{0%{transform:scale(.7);background:var(--sel-edge)}100%{transform:scale(1)}}
+.c{height:2rem;display:flex;align-items:center;justify-content:center;font-size:1rem;font-weight:700}
+.c.odd{background:color-mix(in srgb,var(--line) 28%,transparent)}
+.c.sep,.h.sep{border-right:1.5px solid var(--line)}
+.c.v.T{color:var(--t)} .c.v.F{color:var(--f)}
+.c.cell{cursor:pointer;border-radius:6px}
+.c.cell.T{color:var(--t)} .c.cell.F{color:var(--f)}
+.c.act{background:var(--accent-soft)}
+.c.cur{box-shadow:inset 0 0 0 2px var(--accent)}
+.c.cur:empty::after{content:"";width:2px;height:1rem;background:var(--accent);animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.c.chk{opacity:.42}
+.c.chk.bad{opacity:.85;background:var(--f-soft)}
+.c.flash-ok{background:var(--t-soft)} .c.flash-bad{background:var(--f-soft)}
+.controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.pad{display:flex;gap:6px}
+.pad button{font:700 1.1rem var(--mono);width:3rem;height:2.6rem;border-radius:10px;border:1px solid var(--line);background:var(--surface);cursor:pointer;color:var(--ink)}
+.pad .pt{color:var(--t);background:var(--t-soft);border-color:transparent}
+.pad .pf{color:var(--f);background:var(--f-soft);border-color:transparent}
+.msg{font-weight:600}
+.msg.good{color:var(--t)} .msg.bad{color:var(--f)}
+.verdict{border-radius:14px;padding:12px 14px;background:var(--sel);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.verdict strong{font-family:var(--display);font-size:1.2rem}
+.help{font-size:.88rem;color:var(--muted);margin:0;max-width:70ch}
+kbd{font:600 .78rem var(--mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:0 5px;background:var(--surface)}
+.nsel{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.nsel button{font:700 .95rem var(--mono);width:2.4rem;height:2.4rem;border-radius:50%;border:1px solid var(--line);background:var(--surface);cursor:pointer;color:var(--ink)}
+.nsel button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.timer{font:700 1rem var(--mono);font-variant-numeric:tabular-nums;margin-left:auto}
+@media (prefers-reduced-motion: reduce){*{animation:none!important}}
+</style>
+
+<div class="app">
+  <header>
+    <h1 class="brand">Truth<span>·</span>Maker</h1>
+    <div class="tabs" role="tablist">
+      <button id="tabBlast" role="tab" aria-selected="true">Make</button>
+      <button id="tabWarm" role="tab" aria-selected="false">Warm-up</button>
+    </div>
+    <div class="score"><small>Level</small><b id="lvl">1</b></div>
+    <div class="score"><small>Score</small><b id="score">0</b></div>
+  </header>
+
+  <div class="card pane">
+  <section id="blast" class="panel" role="tabpanel">
+    <div class="bar">
+      <input id="exprIn" aria-label="Expression" spellcheck="false" autocomplete="off">
+      <button class="btn" id="loadBtn">Load</button>
+      <button class="btn" id="nextBtn">Next expression</button>
+      <button class="btn" id="resetBtn">Restart</button>
+    </div>
+    <div class="err" id="err"></div>
+    <div class="info" id="info"></div>
+    <div class="wrap"><div class="grid" id="grid"></div></div>
+    <div id="verdict"></div>
+    <div class="controls">
+      <div class="pad"><button class="pt" data-k="T">T</button><button class="pf" data-k="F">F</button><button data-k="B" aria-label="Erase">⌫</button></div>
+      <button class="btn primary" id="checkBtn" disabled>Check column</button>
+      <span class="msg" id="msg"></span>
+    </div>
+    <p class="help">Click a variable in the expression. Click again inside the highlight to grow it outward one level, until the whole formula is selected. Type <kbd>T</kbd>/<kbd>F</kbd> (or <kbd>1</kbd>/<kbd>0</kbd>) down the column under its main connective, then <kbd>Enter</kbd> to check. Each row scores ±(2<sup>jump</sup> − 1), where the jump is how many levels you climbed above the lowest non-variable part beneath it (a checked part counts at its level; variables don't count). Skip ahead for big points; parts inside a checked column score 0. Write with ~ &amp; V -&gt; &lt;-&gt;.</p>
+  </section>
+
+  <section id="warm" class="panel" role="tabpanel" hidden>
+    <div class="bar">
+      <span class="muted">Variables</span>
+      <div class="nsel" id="nsel"></div>
+      <span class="timer" id="timer">0.0s</span>
+    </div>
+    <div class="wrap"><div class="grid" id="wgrid"></div></div>
+    <div class="controls">
+      <div class="pad"><button class="pt" data-k="T">T</button><button class="pf" data-k="F">F</button><button data-k="B" aria-label="Erase">⌫</button></div>
+      <button class="btn primary" id="wcheck" disabled>Check</button>
+      <button class="btn" id="wreset">Clear</button>
+      <button class="btn" id="wnext" hidden>Next level</button>
+      <span class="msg" id="wmsg"></span>
+    </div>
+    <p class="help">Fill every row so the table counts down in binary: the first row is all <b>T</b>, the last is all <b>F</b>. The rightmost column alternates T F T F; each column to its left changes half as often. Typing fills down a column, then jumps to the next. +1 per correct cell, −1 per wrong one.</p>
+  </section>
+  </div>
+</div>
+
+<script>
+/* ===== 1. Parser ===== */
+const FN={'∧':(a,b)=>a&&b,'∨':(a,b)=>a||b,'→':(a,b)=>!a||b,'↔':(a,b)=>a===b};
+const RULES=[[/^(<->|<=>|↔|iff\b)/,'↔'],[/^(->|=>|→)/,'→'],[/^(&&?|\^|∧|and\b|\*)/,'∧'],[/^(\|\|?|∨|or\b|\+|[Vv](?![a-z]))/,'∨'],[/^(~|!|¬|not\b|-)/,'¬']];
+function tokenize(s){
+  const out=[];let i=0;
+  while(i<s.length){
+    const r=s.slice(i),c=r[0];
+    if(/\s/.test(c)){i++;continue}
+    if(c==='('||c==='['){out.push({t:'(',s:'('});i++;continue}
+    if(c===')'||c===']'){out.push({t:')',s:')'});i++;continue}
+    let hit=null;
+    for(const [re,sym] of RULES){const m=r.match(re);if(m){hit=[m[0],sym];break}}
+    if(hit){out.push({t:'op',s:hit[1]});i+=hit[0].length;continue}
+    if(/[a-uw-zA-UW-Z]/.test(c)){out.push({t:'var',s:c.toLowerCase()});i++;continue}
+    throw Error(`I don't recognize "${c}"`);
+  }
+  return out;
+}
+function parse(str){
+  const toks=tokenize(str),nodes=[];let k=0;
+  if(!toks.length) throw Error('Type an expression first.');
+  const is=s=>toks[k]&&toks[k].t==='op'&&toks[k].s===s;
+  const mk=o=>{o.id=nodes.length;nodes.push(o);return o};
+  const bin=(op,a,b,ai)=>mk({type:'bin',op,a,b,anchor:ai,start:a.start,end:b.end,h:Math.max(a.h,b.h)+1});
+  function pIff(){let l=pImp();while(is('↔')){const ai=k++;l=bin('↔',l,pImp(),ai)}return l}
+  function pImp(){const l=pOr();if(is('→')){const ai=k++;return bin('→',l,pImp(),ai)}return l}
+  function pOr(){let l=pAnd();while(is('∨')){const ai=k++;l=bin('∨',l,pAnd(),ai)}return l}
+  function pAnd(){let l=pNot();while(is('∧')){const ai=k++;l=bin('∧',l,pNot(),ai)}return l}
+  function pNot(){if(is('¬')){const ai=k++,c=pNot();return mk({type:'not',a:c,anchor:ai,start:ai,end:c.end,h:c.h+1})}return pPrim()}
+  function pPrim(){
+    const t=toks[k];if(!t) throw Error('The expression ends too early.');
+    if(t.t==='var'){k++;return mk({type:'var',name:t.s,anchor:k-1,start:k-1,end:k-1,h:0})}
+    if(t.t==='('){const s=k++,e=pIff();if(!toks[k]||toks[k].t!==')') throw Error('A closing parenthesis is missing.');e.start=s;e.end=k++;return e}
+    throw Error(`Unexpected "${t.s}".`);
+  }
+  const root=pIff();
+  if(k<toks.length) throw Error(`Unexpected "${toks[k].s}" — check your parentheses.`);
+  (function link(n,p){n.parent=p;if(n.a)link(n.a,n);if(n.b)link(n.b,n)})(root,null);
+  const vars=[...new Set(nodes.filter(n=>n.type==='var').map(n=>n.name))].sort();
+  return {toks,root,nodes,vars};
+}
+const ev=(n,e)=>n.type==='var'?e[n.name]:n.type==='not'?!ev(n.a,e):FN[n.op](ev(n.a,e),ev(n.b,e));
+const rowVal=(r,j,nv)=>!((r>>(nv-1-j))&1);   // decreasing binary: row 0 all T
+const tokW=t=>t.t==='op'?(t.s==='¬'?1.7:2.5):t.t==='var'?1.9:1.05;
+const txt=(toks,a,b)=>toks.slice(a,b+1).map(t=>t.t==='op'&&t.s!=='¬'?` ${t.s} `:t.s).join('');
+
+/* ===== 2. Score ===== */
+let S=0;   // in-memory only: resets on reload
+const scoreEl=document.getElementById('score');
+function addScore(d){
+  S+=d;
+  scoreEl.textContent=S;
+  if(!d)return;const p=document.createElement('span');
+  p.className='pop '+(d>0?'up':'down');p.textContent=(d>0?'+':'')+d;
+  scoreEl.parentNode.appendChild(p);setTimeout(()=>p.remove(),1200);
+}
+scoreEl.textContent=S;
+
+/* ===== 3. Blast game ===== */
+/* ---------- level spec: edit LEVEL_SPEC to change the levels ---------- */
+const LEVEL_SPEC=`
+# One line per level, in order. Insert or delete a line to insert or delete a level.
+# Each line lists the expressions that level draws from, comma-separated; they cycle in order.
+# Variables: lowercase letters. Operators: ~ & V -> <-> (same as the input box). Brackets group.
+p & ~p, p <-> ~~p
+~(p & ~q), ((p V q) -> p)
+(p -> (q -> p)), ((p V q) & ~(p & q)), ((p -> q) & (q -> p))
+((p & q) V (~p & r)), ((p -> q) V (q -> p))
+(((p -> q) & (q -> r)) -> (p -> r))
+`;
+const parseSpec=text=>text.split('\n').map(l=>l.replace(/#.*$/,'').trim()).filter(Boolean)
+  .map((l,i)=>({n:i+1,exprs:l.split(',').map(x=>x.trim()).filter(Boolean)}));
+const LEVELS=parseSpec(LEVEL_SPEC), LAST_N=LEVELS.length;
+const levelFor=L=>LEVELS[Math.min(L,LAST_N)-1];
+const quota=L=>3+Math.floor(L/2); // completed expressions needed to clear level L
+const LV={level:1,done:0,idx:-1};  // in-memory only: resets on reload
+let B=null;
+function updateLevel(){
+  $('lvl').textContent=LV.level;
+}
+const $=id=>document.getElementById(id);
+const grid=$('grid');
+function loadExpr(str){
+  $('err').textContent='';
+  try{
+    const P=parse(str);
+    if(P.vars.length>5) throw Error('Use at most 5 variables.');
+    const nv=P.vars.length,R=2**nv;
+    const envs=[...Array(R)].map((_,r)=>Object.fromEntries(P.vars.map((v,j)=>[v,rowVal(r,j,nv)])));
+    P.nodes.forEach(n=>n.vals=envs.map(e=>ev(n,e)));
+    B={...P,R,sel:null,cols:{},cur:0,byAnchor:{},burst:false};
+    P.nodes.forEach(n=>B.byAnchor[n.anchor]=n);
+    $('exprIn').value=txt(P.toks,0,P.toks.length-1);
+    $('msg').textContent='';
+    renderBlast();
+  }catch(e){$('err').textContent=e.message}
+}
+function worth(n){
+  for(let p=n.parent;p;p=p.parent) if(B.cols[p.anchor]?.checked) return 0;
+  // variables are given, not checked, so they don't pull the base down
+  const base=x=>{if(x.type==='var')return 0;const k=[x.a,x.b].filter(c=>c&&c.type!=='var').map(c=>B.cols[c.anchor]?.checked?c.h:base(c));return k.length?Math.min(...k):0};
+  return 2**(n.h-base(n))-1;
+}
+const col=a=>B.cols[a]||(B.cols[a]={vals:Array(B.R).fill(''),checked:false,ok:[]});
+function select(n,r){
+  B.sel=n;B.burst=true;
+  const c=col(n.anchor);
+  B.cur=r!=null?r:Math.max(0,c.vals.indexOf(''));
+  $('msg').textContent='';
+}
+function clickToken(i){
+  const s=B.sel;
+  const smallest=()=>B.nodes.filter(n=>n.start<=i&&i<=n.end).sort((a,b)=>(a.end-a.start)-(b.end-b.start))[0];
+  if(s&&s.start<=i&&i<=s.end) select(s.parent||smallest()); else select(smallest());
+  renderBlast();
+}
+function clickCell(a,r){
+  const n=B.byAnchor[a],c=col(a);
+  if(B.sel!==n){select(n,r)}
+  else if(!c.checked){
+    if(B.cur===r) c.vals[r]=c.vals[r]===''?'T':c.vals[r]==='T'?'F':'';
+    B.cur=r;
+  }
+  renderBlast();
+}
+function typeVal(v){
+  if(!B.sel){$('msg').className='msg';$('msg').textContent='Click part of the expression first.';return}
+  const c=col(B.sel.anchor);if(c.checked)return;
+  c.vals[B.cur]=v;
+  const nx=c.vals.indexOf('',B.cur+1);
+  B.cur=nx>=0?nx:Math.min(B.cur+1,B.R-1);
+  renderBlast();
+}
+function back(){
+  if(!B.sel)return;const c=col(B.sel.anchor);if(c.checked)return;
+  if(c.vals[B.cur]===''&&B.cur>0)B.cur--;
+  c.vals[B.cur]='';renderBlast();
+}
+function move(d){if(!B.sel)return;B.cur=Math.max(0,Math.min(B.R-1,B.cur+d));renderBlast()}
+function checkBlast(){
+  const n=B.sel;if(!n)return;const c=col(n.anchor);
+  if(c.checked||c.vals.includes(''))return;
+  const w=worth(n);let d=0,right=0;
+  c.ok=n.vals.map((v,r)=>c.vals[r]===(v?'T':'F'));
+  c.ok.forEach(o=>{d+=o?w:-w;if(o)right++});
+  c.checked=true;addScore(d);
+  const m=$('msg');m.className='msg '+(d>=0?'good':'bad');
+  m.textContent=`${right}/${B.R} right · ${d>=0?'+':''}${d}`+(right===B.R?' — flawless!':'');
+  B.burst=false;renderBlast();
+}
+function renderBlast(){
+  const {toks,vars,R,sel}=B,nv=vars.length;
+  grid.style.gridTemplateColumns=`repeat(${nv},2.1rem) 1.3rem `+toks.map(t=>tokW(t)+'rem').join(' ');
+  let h='';
+  vars.forEach(v=>h+=`<div class="h vh">${v}</div>`);h+='<div class="h sep"></div>';
+  toks.forEach((t,i)=>{
+    const inS=sel&&i>=sel.start&&i<=sel.end,n=B.byAnchor[i],done=n&&B.cols[i]&&B.cols[i].checked;
+    h+=`<div class="h tok${inS?' in':''}${sel&&i===sel.start?' s0':''}${sel&&i===sel.end?' s1':''}${sel&&i===sel.anchor?' an':''}${i===B.root.anchor?' root':''}${inS&&B.burst?' burst':''}${done?' done':''}" data-i="${i}">${t.s}</div>`;
+  });
+  for(let r=0;r<R;r++){
+    const o=r%2?' odd':'';
+    vars.forEach((v,j)=>{const T=rowVal(r,j,nv);h+=`<div class="c v ${T?'T':'F'}${o}">${T?'T':'F'}</div>`});
+    h+=`<div class="c sep${o}"></div>`;
+    toks.forEach((t,i)=>{
+      const n=B.byAnchor[i];
+      if(!n){h+=`<div class="c${o}"></div>`;return}
+      const c=B.cols[i],act=sel===n;
+      const v=c?(c.checked&&!c.ok[r]?(n.vals[r]?'T':'F'):c.vals[r]):'';   // wrong cells show the corrected value
+      h+=`<div class="c cell ${v}${o}${act?' act':''}${act&&!c?.checked&&r===B.cur?' cur':''}${c?.checked?' chk':''}${c?.checked&&!c.ok[r]?' bad':''}${i===B.root.anchor?' root':''}" data-a="${i}" data-r="${r}">${v}</div>`;
+    });
+  }
+  grid.innerHTML=h;B.burst=false;
+  // info line
+  const total=B.nodes.length,doneN=Object.values(B.cols).filter(c=>c.checked).length;
+  if(sel){
+    const c=col(sel.anchor);
+    $('info').innerHTML=`<span class="sub">${txt(toks,sel.start,sel.end)}</span><span class="chip sun">Level ${sel.h}</span>${c.checked?'':`<span class="chip">This jump: ±${worth(sel)} per row</span>`}<span class="muted">${c.checked?'Checked':'Fill the highlighted column'} · ${doneN}/${total} columns done</span>`;
+    const ready=!c.checked&&!c.vals.includes('');
+    $('checkBtn').disabled=!ready;$('checkBtn').classList.toggle('ready',ready);
+  }else{
+    $('info').innerHTML=`<span class="muted">Click a variable in the expression to start making its table · ${doneN}/${total} columns done</span>`;
+    $('checkBtn').disabled=true;$('checkBtn').classList.remove('ready');
+  }
+  // verdict once the whole formula is checked
+  const rc=B.cols[B.root.anchor];
+  if(rc&&rc.checked){
+    const t=B.root.vals.filter(Boolean).length;
+    const kind=t===R?'Tautology':t===0?'Contradiction':'Contingent';
+    const why=t===R?'True on every row.':t===0?'False on every row.':`True on ${t} of ${R} rows.`;
+    if(!B.counted){B.counted=true;LV.done++}
+    const q=quota(LV.level), last=LV.level>=LAST_N;
+    const lvl=LV.done>=q?(last?'All levels cleared — keep practicing.':`Level ${LV.level} cleared.`):`Level ${LV.level}: ${LV.done}/${q} done.`;
+    const btn=LV.done>=q&&!last?'Next level':'Next expression';
+    $('verdict').innerHTML=`<div class="verdict"><strong>${kind}</strong><span>${why} <span class="muted">${lvl}</span></span><button class="btn primary" onclick="nextExpr()">${btn}</button></div>`;
+  }else $('verdict').innerHTML='';
+}
+function nextExpr(){
+  if(LV.done>=quota(LV.level)&&LV.level<LAST_N){LV.level++;LV.done=0;LV.idx=-1;updateLevel()}
+  const pool=levelFor(LV.level).exprs;
+  LV.idx=(LV.idx+1)%pool.length;
+  loadExpr(pool[LV.idx]);
+}
+grid.addEventListener('click',e=>{
+  const t=e.target.closest('[data-i]');if(t)return clickToken(+t.dataset.i);
+  const c=e.target.closest('[data-a]');if(c)clickCell(+c.dataset.a,+c.dataset.r);
+});
+$('loadBtn').onclick=()=>loadExpr($('exprIn').value);
+$('exprIn').addEventListener('keydown',e=>{if(e.key==='Enter')loadExpr(e.target.value)});
+$('nextBtn').onclick=nextExpr;
+$('resetBtn').onclick=()=>loadExpr($('exprIn').value);
+$('checkBtn').onclick=checkBlast;
+
+/* ===== 4. Warm-up ===== */
+const VN='pqrst';let W;
+const wgrid=$('wgrid');
+function newWarm(n){
+  const R=2**n;
+  W={n,R,vals:[...Array(n)].map(()=>Array(R).fill('')),checked:false,ok:null,cur:{c:0,r:0},t0:null,t1:null};
+  $('wmsg').textContent='';$('wnext').hidden=true;
+  [...$('nsel').children].forEach((b,i)=>b.setAttribute('aria-pressed',i+1===n));
+  renderWarm();
+}
+function renderWarm(){
+  const {n,R,vals,cur,checked,ok}=W;
+  wgrid.style.gridTemplateColumns=`repeat(${n},2.6rem)`;
+  let h='';for(let c=0;c<n;c++)h+=`<div class="h vh" style="color:var(--ink)">${VN[c]}</div>`;
+  for(let r=0;r<R;r++)for(let c=0;c<n;c++){
+    const v=checked&&!ok[c][r]?(rowVal(r,c,n)?'T':'F'):vals[c][r],isCur=!checked&&cur.c===c&&cur.r===r;
+    h+=`<div class="c cell ${v}${r%2?' odd':''}${isCur?' cur act':''}${checked?(ok[c][r]?' flash-ok':' flash-bad'):''}" data-c="${c}" data-r="${r}">${v}</div>`;
+  }
+  wgrid.innerHTML=h;
+  const full=vals.every(col=>!col.includes(''));
+  $('wcheck').disabled=checked||!full;$('wcheck').classList.toggle('ready',!checked&&full);
+}
+function wAdvance(){let {c,r}=W.cur;r++;if(r>=W.R){r=0;c=Math.min(c+1,W.n-1)}W.cur={c,r}}
+function wType(v){
+  if(W.checked)return;if(!W.t0)W.t0=performance.now();
+  W.vals[W.cur.c][W.cur.r]=v;
+  if(!(W.cur.c===W.n-1&&W.cur.r===W.R-1))wAdvance();
+  renderWarm();
+}
+function wBack(){
+  if(W.checked)return;let {c,r}=W.cur;
+  if(W.vals[c][r]===''){if(r>0)r--;else if(c>0){c--;r=W.R-1}}
+  W.vals[c][r]='';W.cur={c,r};renderWarm();
+}
+function wMove(d){if(W.checked)return;W.cur.r=Math.max(0,Math.min(W.R-1,W.cur.r+d));renderWarm()}
+function wCheck(){
+  if(W.checked||W.vals.some(col=>col.includes('')))return;
+  W.t1=performance.now();W.checked=true;
+  W.ok=W.vals.map((col,c)=>col.map((v,r)=>v===(rowVal(r,c,W.n)?'T':'F')));
+  const right=W.ok.flat().filter(Boolean).length,all=W.n*W.R;
+  addScore(right-(all-right));
+  const m=$('wmsg');
+  if(right===all){m.className='msg good';m.textContent=`Perfect in ${((W.t1-W.t0)/1000).toFixed(1)}s!`;$('wnext').hidden=W.n>=5}
+  else{m.className='msg bad';m.textContent=`${right}/${all} right. Pink cells show the corrected values.`}
+  renderWarm();
+}
+for(let i=1;i<=5;i++){const b=document.createElement('button');b.textContent=i;b.onclick=()=>newWarm(i);$('nsel').appendChild(b)}
+wgrid.addEventListener('click',e=>{
+  const t=e.target.closest('[data-c]');if(!t||W.checked)return;
+  const c=+t.dataset.c,r=+t.dataset.r;
+  if(W.cur.c===c&&W.cur.r===r){const v=W.vals[c][r];W.vals[c][r]=v===''?'T':v==='T'?'F':''}
+  W.cur={c,r};renderWarm();
+});
+$('wcheck').onclick=wCheck;$('wreset').onclick=()=>newWarm(W.n);$('wnext').onclick=()=>newWarm(W.n+1);
+setInterval(()=>{if(!W||!W.t0)return;$('timer').textContent=(((W.t1||performance.now())-W.t0)/1000).toFixed(1)+'s'},100);
+
+/* ===== 5. Input routing ===== */
+let mode='blast';
+function setMode(m){
+  mode=m;$('blast').hidden=m!=='blast';$('warm').hidden=m!=='warm';
+  $('tabBlast').setAttribute('aria-selected',m==='blast');$('tabWarm').setAttribute('aria-selected',m==='warm');
+  if(m==='warm'&&W)$('timer').textContent=W.t0?$('timer').textContent:'0.0s';
+}
+$('tabBlast').onclick=()=>setMode('blast');$('tabWarm').onclick=()=>setMode('warm');
+// drop button focus after each click so Enter/Space can't re-fire a control from the other panel
+document.addEventListener('click',e=>{const b=e.target.closest('button');if(b)b.blur()});
+document.querySelectorAll('.pad button').forEach(b=>b.onclick=()=>{
+  const k=b.dataset.k,bl=mode==='blast';
+  if(k==='B')bl?back():wBack();else bl?typeVal(k):wType(k);
+});
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT'||e.metaKey||e.ctrlKey||e.altKey)return;
+  if(e.key==='Enter'&&e.target.tagName==='BUTTON')return;   // a focused button handles its own Enter
+  if(e.key===']'&&mode==='blast'){LV.done=quota(LV.level);nextExpr();e.preventDefault();return} // secret: skip to next level
+  const k=e.key.toLowerCase(),bl=mode==='blast';
+  let v=null;if(k==='t'||k==='1')v='T';else if(k==='f'||k==='0')v='F';
+  if(v){bl?typeVal(v):wType(v);e.preventDefault()}
+  else if(k==='backspace'||k==='delete'){bl?back():wBack();e.preventDefault()}
+  else if(k==='arrowdown'||k==='arrowup'){const d=k==='arrowdown'?1:-1;bl?move(d):wMove(d);e.preventDefault()}
+  else if(k==='enter'){bl?checkBlast():wCheck()}
+  else if(k==='escape'&&bl){B.sel=null;renderBlast()}
+});
+
+updateLevel();nextExpr();newWarm(1);
+</script>
