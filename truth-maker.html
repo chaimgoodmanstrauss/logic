@@ -68,7 +68,6 @@ header{display:flex;align-items:center;justify-content:flex-start;gap:16px;flex-
 [hidden]{display:none!important}
 .panel{display:flex;flex-direction:column;align-items:flex-start;text-align:left;gap:14px;min-width:0}
 .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:flex-start}
-.bar input{flex:1 1 220px;min-width:0;font:500 1rem var(--mono);padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)}
 .btn{font:600 .9rem var(--body);border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:9px 14px;border-radius:10px;cursor:pointer}
 .btn:hover{border-color:var(--accent)}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
@@ -108,7 +107,7 @@ header{display:flex;align-items:center;justify-content:flex-start;gap:16px;flex-
 .c.cur:empty::after{content:"";width:2px;height:1rem;background:var(--accent);animation:blink 1s steps(1) infinite}
 @keyframes blink{50%{opacity:0}}
 .c.chk{opacity:.42}
-.c.chk.bad{opacity:.85;background:var(--f-soft)}
+.c.chk.bad,.c.bad{opacity:.85;background:var(--f-soft)}
 .c.flash-ok{background:var(--t-soft)} .c.flash-bad{background:var(--f-soft)}
 .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:flex-start}
 .pad{display:flex;gap:6px}
@@ -138,6 +137,8 @@ kbd{font:600 .78rem var(--mono);border:1px solid var(--line);border-bottom-width
     <div class="statrow">
       <div class="score"><small>Level</small><b id="lvl">1</b></div>
       <div class="score"><small>Score</small><b id="score">0</b></div>
+      <button class="btn" id="prevLvlBtn" aria-label="Previous level">◀ Level</button>
+      <button class="btn" id="nextLvlBtn" aria-label="Next level">Level ▶</button>
       <button class="btn" id="resetGameBtn">Reset game</button>
     </div>
   </header>
@@ -151,12 +152,12 @@ kbd{font:600 .78rem var(--mono);border:1px solid var(--line);border-bottom-width
     <div class="err" id="err"></div>
     <div class="info" id="info"></div>
     <div class="wrap"><div class="grid" id="grid"></div></div>
-    <div id="verdict"></div>
     <div class="controls">
       <div class="pad"><button class="pt" data-k="T">T</button><button class="pf" data-k="F">F</button><button data-k="B" aria-label="Erase">⌫</button></div>
       <button class="btn primary" id="checkBtn" disabled>Check column</button>
       <span class="msg" id="msg"></span>
     </div>
+    <div id="verdict"></div>
   </section>
 
   <section id="warm" class="panel" role="tabpanel" hidden>
@@ -201,7 +202,7 @@ function parse(str){
   const toks=tokenize(str),nodes=[];let k=0;
   if(!toks.length) throw Error('Type an expression first.');
   const is=s=>toks[k]&&toks[k].t==='op'&&toks[k].s===s;
-  const mk=o=>{o.id=nodes.length;nodes.push(o);return o};
+  const mk=o=>{nodes.push(o);return o};
   const bin=(op,a,b,ai)=>mk({type:'bin',op,a,b,anchor:ai,start:a.start,end:b.end,h:Math.max(a.h,b.h)+1});
   function pIff(){let l=pImp();while(is('↔')){const ai=k++;l=bin('↔',l,pImp(),ai)}return l}
   function pImp(){const l=pOr();if(is('→')){const ai=k++;return bin('→',l,pImp(),ai)}return l}
@@ -228,8 +229,9 @@ const txt=(toks,a,b)=>toks.slice(a,b+1).map(t=>t.t==='op'&&t.s!=='¬'?` ${t.s} `
 /* ===== 2. Score ===== */
 let S=0;   // in-memory only: resets on reload
 const scoreEl=document.getElementById('score');
+const LS={};   // points earned per level (blast game only), so revisiting a level can wipe them
 function addScore(d){
-  S+=d;
+  S+=d;if(mode==='blast')LS[LV.level]=(LS[LV.level]||0)+d;
   scoreEl.textContent=S;
   if(!d)return;const p=document.createElement('span');
   p.className='pop '+(d>0?'up':'down');p.textContent=(d>0?'+':'')+d;
@@ -237,17 +239,32 @@ function addScore(d){
 }
 scoreEl.textContent=S;
 
-/* ===== 3. Blast game ===== */
+
 /* ---------- level spec: edit LEVEL_SPEC to change the levels ---------- */
 const LEVEL_SPEC=`
 # One line per level, in order. Insert or delete a line to insert or delete a level.
 # Each line lists the expressions that level draws from, comma-separated; they cycle in order.
-# Variables: lowercase letters. Operators: ~ & V -> <-> (same as the input box). Brackets group.
-p & ~p, p <-> ~~p
-~(p & ~q), ((p V q) -> p)
-(p -> (q -> p)), ((p V q) & ~(p & q)), ((p -> q) & (q -> p))
-((p & q) V (~p & r)), ((p -> q) V (q -> p))
-(((p -> q) & (q -> r)) -> (p -> r))
+# Variables: lowercase letters. Operators: ~ & V -> <->. Brackets group.
+p & ~p, p V ~p, p & ~q,  ~(p & ~q), p & ~q
+p V ~q, ~(p V ~q),  p V q, ~(p V q)
+p V ~q <-> ~(p V ~q),  p V ~q <-> ~(p & ~q), p & ~q <-> ~(p & ~q), p & ~q <-> ~(p V ~q), 
+p & (~p V q), (p V q) & (~p V ~q), (p&q) V (~p & ~q), (p V q) & (~p V ~q)
+(~p V  ~q), ~(p & q), (p & q) V (~p & ~q), (p V q) & (~p V ~q), (p & ~q) V (~p & q)
+p & ( q & r), p V (q & r), (p & q) V r, ~(p & q) & ~r
+p & (q V r), q & (~p V r), (r & q) & ~p, ~(p & ~q) & p, ~(p V q) & ~p, ~p & (q V ~r)
+~(p V (~q & r)), ~(p & ~q) V ~q, (~p & q) V (p & r), (p V q) & ~(p & q), (p & q) V (~p & r)
+(p & q) V (~p V ~q), (~p & q) V (~q & p), (~r & ~q) V (p & q), ~(p V ~q) & ~(p V r), p -> q
+p -> q, q V ~p, p & ~q, ~(p->q)
+p -> q <-> q V ~p, p & ~q <-> ~(p->q)
+(p ->q) V p, (p & q)->p, (p V q)->q, q->(p & q)
+(p V (q & r)) <-> ((p V q) & (p V r)), (p & (q V r)) <-> ((p & q) V (p & r))
+~(p -> ~q), (p V q) -> p, p -> (q -> p), (p & ~q) -> r, ~r -> (p V q)
+(~p & q) -> ~p, ~(p -> ~(p -> q)), (p -> q) & (q V r), (p -> q) & (q -> p), (p -> q) V (q -> p)
+(p V q) -> (p & q), (p & (p -> q)) -> q, (p & q) -> (p V ~q), ((p & q) -> ~q) -> p, ((p & q) -> ~q) -> q
+(p & ~q) -> (~p V r), (~p -> r) & (~q -> r), (~q & (p -> q)) -> ~p, ~p -> ((p & q) -> ~q), ((p V q) V (~p & q)) -> q
+((p -> q) & (q -> r)) -> (p -> r), (p & (p -> q) & (~q V r)) -> r, ((p -> q) & ~p & (r V q)) -> r, ((p V q) & (~p V r)) -> (q & r), ((p V q) & (p -> ~q) & (p -> r)) -> r
+((p -> ~q) & (p -> q) & (r -> p)) -> ~r, p <-> ~~p, ~~p <-> p, (p -> q) <-> (~p V q), ~(p -> q) <-> (p & ~q)
+(p -> q) <-> (~q -> ~p), ~(p -> ~q) <-> (p & q), ~(p V q) <-> (~p & ~q), ~(p & q) <-> (~p V ~q), ((p & q) -> ~p) <-> ~(p & q)
 `;
 const parseSpec=text=>text.split('\n').map(l=>l.replace(/#.*$/,'').trim()).filter(Boolean)
   .map((l,i)=>({n:i+1,exprs:l.split(',').map(x=>x.trim()).filter(Boolean)}));
@@ -286,7 +303,7 @@ const col=a=>B.cols[a]||(B.cols[a]={vals:Array(B.R).fill(''),checked:false,ok:[]
 function select(n,r){
   B.sel=n;B.burst=true;
   const c=col(n.anchor);
-  B.cur=r!=null?r:Math.max(0,c.vals.indexOf(''));
+  B.cur=r!=null?r:c.checked?Math.max(0,c.ok.indexOf(false)):Math.max(0,c.vals.indexOf(''));
   $('msg').textContent='';
 }
 function clickToken(i){
@@ -300,15 +317,23 @@ const cycle=v=>v===''?'T':v==='T'?'F':'';
 function clickCell(a,r){
   const n=B.byAnchor[a],c=col(a);
   if(B.sel!==n){select(n,r)}
-  else if(!c.checked){
+  else if(!c.checked||!c.ok[r]){   // wrong cells of a checked column stay editable, for a resubmit
     c.vals[r]=cycle(c.vals[r]);
+    if(c.checked)(c.redo||(c.redo=[]))[r]=true;
     B.cur=r;
   }
   renderBlast();
 }
 function typeVal(v){
   if(!B.sel){$('msg').className='msg';$('msg').textContent='Click part of the expression first.';return}
-  const c=col(B.sel.anchor);if(c.checked)return;
+  const c=col(B.sel.anchor);
+  if(c.checked){   // fixing a wrong cell: type over it, then hop to the next wrong one
+    if(c.ok[B.cur])return;
+    c.vals[B.cur]=v;(c.redo||(c.redo=[]))[B.cur]=true;
+    const nx=c.ok.findIndex((o,r)=>!o&&r>B.cur);
+    if(nx>=0)B.cur=nx;
+    renderBlast();return;
+  }
   c.vals[B.cur]=v;
   const nx=c.vals.indexOf('',B.cur+1);
   B.cur=nx>=0?nx:Math.min(B.cur+1,B.R-1);
@@ -322,13 +347,14 @@ function back(){
 function move(d){if(!B.sel)return;B.cur=Math.max(0,Math.min(B.R-1,B.cur+d));renderBlast()}
 function checkBlast(){
   const n=B.sel;if(!n)return;const c=col(n.anchor);
-  if(c.checked||c.vals.includes(''))return;
-  const w=worth(n);let d=0,right=0;
+  if(c.vals.includes('')||(c.checked&&!(c.redo||[]).some(Boolean)))return;
+  const again=c.checked,w=worth(n);let d=0,right=0;
   c.ok=n.vals.map((v,r)=>c.vals[r]===(v?'T':'F'));
   c.ok.forEach(o=>{d+=o?w:-w;if(o)right++});
-  c.checked=true;addScore(d);
-  const m=$('msg');m.className='msg '+(d>=0?'good':'bad');
-  m.textContent=`${right}/${B.R} right · ${d>=0?'+':''}${d}`+(right===B.R?' — flawless!':'');
+  c.checked=true;c.redo=[];
+  if(!again)addScore(d);   // a resubmit rescores nothing: the first attempt's points stand
+  const m=$('msg');m.className='msg '+((again?right===B.R:d>=0)?'good':'bad');
+  m.textContent=again?`${right}/${B.R} right now`+(right===B.R?' — fixed!':' — keep fixing the shaded cells'):`${right}/${B.R} right · ${d>=0?'+':''}${d}`+(right===B.R?' — flawless!':'');
   B.burst=false;renderBlast();
 }
 function renderBlast(){
@@ -338,7 +364,7 @@ function renderBlast(){
   vars.forEach(v=>h+=`<div class="h vh">${v}</div>`);h+='<div class="h sep"></div>';
   toks.forEach((t,i)=>{
     const inS=sel&&i>=sel.start&&i<=sel.end,n=B.byAnchor[i],done=n&&B.cols[i]&&B.cols[i].checked;
-    h+=`<div class="h tok${inS?' in':''}${sel&&i===sel.start?' s0':''}${sel&&i===sel.end?' s1':''}${sel&&i===sel.anchor?' an':''}${i===B.root.anchor?' root':''}${inS&&B.burst?' burst':''}${done?' done':''}" data-i="${i}">${t.s}</div>`;
+    h+=`<div class="h tok${inS?' in':''}${sel&&i===sel.start?' s0':''}${sel&&i===sel.end?' s1':''}${sel&&i===sel.anchor?' an':''}${inS&&B.burst?' burst':''}${done?' done':''}" data-i="${i}">${t.s}</div>`;
   });
   for(let r=0;r<R;r++){
     const o=r%2?' odd':'';
@@ -348,8 +374,9 @@ function renderBlast(){
       const n=B.byAnchor[i];
       if(!n){h+=`<div class="c${o}"></div>`;return}
       const c=B.cols[i],act=sel===n;
-      const v=c?(c.checked&&!c.ok[r]?(n.vals[r]?'T':'F'):c.vals[r]):'';   // wrong cells show the corrected value
-      h+=`<div class="c cell ${v}${o}${act?' act':''}${act&&!c?.checked&&r===B.cur?' cur':''}${c?.checked?' chk':''}${c?.checked&&!c.ok[r]?' bad':''}${i===B.root.anchor?' root':''}" data-a="${i}" data-r="${r}">${v}</div>`;
+      const v=c?c.vals[r]:'';   // wrong cells keep the user's answer, shaded, until edited
+      const wrong=c?.checked&&!c.ok[r],rd=wrong&&c.redo?.[r];
+      h+=`<div class="c cell ${v}${o}${act?' act':''}${act&&(!c?.checked||wrong)&&r===B.cur?' cur':''}${c?.checked&&!wrong?' chk':''}${wrong&&!rd?' bad':''}${i===B.root.anchor?' root':''}" data-a="${i}" data-r="${r}">${v}</div>`;
     });
   }
   grid.innerHTML=h;B.burst=false;
@@ -358,7 +385,7 @@ function renderBlast(){
   if(sel){
     const c=col(sel.anchor);
     $('info').innerHTML=`<span class="sub">${txt(toks,sel.start,sel.end)}</span><span class="chip sun">Level ${sel.h}</span>${c.checked?'':`<span class="chip">This jump: ±${worth(sel)} per row</span>`}<span class="muted">${c.checked?'Checked':'Fill the highlighted column'} · ${doneN}/${total} columns done</span>`;
-    const ready=!c.checked&&!c.vals.includes('');
+    const ready=(!c.checked||(c.redo||[]).some(Boolean))&&!c.vals.includes('');
     $('checkBtn').disabled=!ready;$('checkBtn').classList.toggle('ready',ready);
   }else{
     $('info').innerHTML=`<span class="muted">Click a variable in the expression to start making its table · ${doneN}/${total} columns done</span>`;
@@ -388,8 +415,15 @@ grid.addEventListener('click',e=>{
 });
 $('nextBtn').onclick=nextExpr;
 $('clearBtn').onclick=()=>loadExpr(CUR);
+const goLevel=d=>{ // jump a level (score kept); clamped to the defined levels
+  const L=Math.max(1,Math.min(LAST_N,LV.level+d));
+  Object.assign(LV,{level:L,done:0,idx:-1});
+  S-=LS[L]||0;LS[L]=0;scoreEl.textContent=S;   // revisiting a level resets that level's score
+  updateLevel();nextExpr();
+};
+$('prevLvlBtn').onclick=()=>goLevel(-1);$('nextLvlBtn').onclick=()=>goLevel(1);
 $('resetGameBtn').onclick=()=>{ // back to the start of level 1, score included
-  Object.assign(LV,{level:1,done:0,idx:-1});S=0;scoreEl.textContent=S;updateLevel();nextExpr();
+  Object.assign(LV,{level:1,done:0,idx:-1});S=0;for(const k in LS)delete LS[k];scoreEl.textContent=S;updateLevel();nextExpr();
 };
 $('checkBtn').onclick=checkBlast;
 
@@ -464,7 +498,7 @@ document.querySelectorAll('.pad button').forEach(b=>b.onclick=()=>{
   if(k==='B')bl?back():wBack();else bl?typeVal(k):wType(k);
 });
 document.addEventListener('keydown',e=>{
-  if(e.target.tagName==='INPUT'||e.metaKey||e.ctrlKey||e.altKey)return;
+  if(e.metaKey||e.ctrlKey||e.altKey)return;
   if(e.key==='Enter'&&e.target.tagName==='BUTTON')return;   // a focused button handles its own Enter
   if(e.key===']'&&mode==='blast'){LV.done=quota(LV.level);nextExpr();e.preventDefault();return} // secret: skip to next level
   const k=e.key.toLowerCase(),bl=mode==='blast';
